@@ -602,6 +602,21 @@ namespace Go
 				     std::vector<float>& result, std::vector<std::vector<int> >& lastBoxCall,
 				     int return_type, int search_extend);
 
+  /// Calculates the first and second order derivatives of the closest point functon on a surface for a given point. The closest point function is a function
+  /// from the 3D space to surface points in the 3D space. If the closest point is on the interior of the surface, the closest point function of the surface
+  /// is used to the get the derivatives. If the closest point is on the interior of a surface boundary curve, the closest point function of the curve is used.
+  /// If the closest point is on the start or end point of a surface boundary curve, the constant function to the closest point is used.
+  /// \param point The point to find the closest point to
+  /// \param closest_point The closest point on the surface, must be precalculated
+  /// \param par_u The first parameter of the closest point on the surface
+  /// \param par_v The second parameter of the closest point on the surface
+  /// \param surface The surface
+  /// \param result Where the result is stored. The result will be 30 values, first the 3 coordinates of the closest point,
+  /// then the coordinates of the first order derivatives of the closest point function in order dx, dy, dz, then the coordinates
+  /// of the second order derivatives in order dxdx, dxdy, dxdz, dydy, dydz, dzdz.
+  /// \param insert_pos The insert position in the 'result' vector of the first value. The 'result' vector must have length at least 30 + 'insert_pos'.
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, std::vector<float>& result, int insert_pos);
+
   /// Calculates the closest points of a point cloud to a surface model, after a SO(3)-rotation and translation is applied on the point clod.
   /// The method uses polygons inside the bounding curves on paramter domains to help determining if parameter pairs are inside the
   /// parameter domain. NB! The creation of the polygons is not yet proven to guarantee inside polygons, thus there is a theoretical
@@ -610,7 +625,8 @@ namespace Go
   /// structure      - the preprocessed structure used to improve the calculation speed. This also holds the surface model.
   /// rotationMatrix - An orthogonal 3x3 matrix describing the rotation to be applied in the point cloud before starting the calculations
   /// translation    - A translation vector to be added to the point cloud (after the orthogonal rotation) before starting the calculations
-  /// return_type    - Tell whether the distances (0), signed distances (1) or closest points (2) should be returned
+  /// return_type    - Tell whether the distances (0), signed distances (1), closest points (2), signed distances, surface indices and parameters (3)
+  ///                  or closest points, first order and second order derivatives of closest point functions (4) should be returned
   /// start_idx      - Used for defining the subset of the points on which the calculation should be performed, see below
   /// skip           - Used for defining the subset of the points on which the calculation should be performed, see below
   /// max_idx        - Used for defining the subset of the points on which the calculation should be performed. The subset consists of the
@@ -634,9 +650,11 @@ namespace Go
 
 
   /// Make closest point calculations on the entire set of a point cloud.
-  /// Fot return_type == 0, the distances are returned
-  /// Fot return_type == 1, the signed distances are returned
-  /// Fot return_type == 2, the points are returned
+  /// For return_type == 0, the distances are returned
+  /// For return_type == 1, the signed distances are returned
+  /// For return_type == 2, the points are returned
+  /// For return_type == 3, the signed distances, surface indices and parameters are returned
+  /// For return_type == 4, the points, first order and second orderd derivatives of closest point functions are returned
   std::vector<float> closestPointCalculations(const std::vector<float>& pts, const shared_ptr<boxStructuring::BoundingBoxStructure>& structure,
 					      const std::vector<std::vector<double> >& rotationMatrix, const Point& translation,
 					      int return_type);
@@ -690,6 +708,18 @@ namespace Go
   std::vector<float> closestSignedDistanceSfParams(const std::vector<float>& inPoints,
                                                    const shared_ptr<boxStructuring::BoundingBoxStructure>& boxStructure,
                                                    const std::vector<std::vector<double> >& rotationMatrix, const Point& translation);
+
+  /// Calculates the value, first and second order derivatives of the closest point function for each point in a point cloud to a given
+  /// surface model, after a SO(3)-rotation and translation is applied on the point cloud.
+  /// pts            - The point cloud, of length 3N where N is the number of points, on format p[0][0], p[0][1], p[0][2], p[1][0] , ...
+  /// structure      - the preprocessed structure used to improve the calculation speed. This also holds the surface model.
+  /// rotationMatrix - An orthogonal 3x3 matrix describing the rotation to be applied in the point cloud before starting the calculations
+  /// translation    - A translation vector to be added to the point cloud (after the orthogonal rotation) before starting the calculations
+  /// returns a vector of length 10*pts.size(), holding the 3 coordinates of the closest point, then the coordinates of the closest
+  /// point function derivatives dx, dy, dz, dxdx, dxdy, dxdz, dydy, dydz, dzdz.
+  std::vector<float> closestPointDerivatives(const std::vector<float>& inPoints,
+    const shared_ptr<boxStructuring::BoundingBoxStructure>& boxStructure,
+    const std::vector<std::vector<double> >& rotationMatrix, const Point& translation);
 
 } // namespace Go
 

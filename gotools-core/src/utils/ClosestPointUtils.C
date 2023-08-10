@@ -50,6 +50,7 @@
 #include "GoTools/geometry/Cylinder.h"
 #include "GoTools/geometry/Plane.h"
 #include "GoTools/geometry/ClassType.h"
+#include <GoTools/geometry/GoIntersections.h>
 #include "GoTools/utils/ClosestPointUtils.h"
 #ifdef _OPENMP
 #include <omp.h>
@@ -58,6 +59,7 @@
 using namespace std;
 using namespace Go;
 using namespace Go::boxStructuring;
+using namespace Go::matrix3DUtils;
 
 
 // #define LOG_CLOSEST_POINTS
@@ -932,7 +934,7 @@ namespace Go
   {
     // Struct for data on possible candidate for closest point on a bounded surface, but with uncertainty about wether the point is inside the boundary.
     // This happens when closestPoint() has only been called on the underlying surface, and the preprocessing data are not precise enough to guarantee
-    // is we are inside the boundary or not. This is done to postpone, and possibly cancel, a call to BoundedSurface::closestPoint() which is slower
+    // if we are inside the boundary or not. This is done to postpone, and possibly cancel, a call to BoundedSurface::closestPoint() which is slower
     // than closestPoint() on the underlying surface.
     struct PossibleInside
     {
@@ -1064,10 +1066,10 @@ namespace Go
 
     // Best point data
     bool any_clp_found = false;
-    double best_dist;
+    double best_dist = 0.0;
     Point best_pt;
-    double best_u;
-    double best_v;
+    double best_u = 0.0;
+    double best_v = 0.0;
     int best_idx = -1;
 
     // Main loop for running through possible candidates.
@@ -1398,8 +1400,185 @@ namespace Go
         result[4*pt_idx + 2] = (float)best_u;
         result[4*pt_idx + 3] = (float)best_v;
     }
+    else if (return_type == 4) // Store closest point and first and second order derivaties of closest point function
+    {
+      shared_ptr<ParamSurface> paramSurf = boxStructure->getSurface(best_idx)->surface(thread_id);
+      closestPointWithDerivatives(pt, best_pt, best_u, best_v, paramSurf, result, 30 * pt_idx);
+    }
   }
 
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, vector<float>& result, int insert_pos)
+  {
+    // First insert point
+    for (int i = 0; i < 3; ++i)
+      result[insert_pos + i] = (float)closest_point[i];
+    insert_pos += 3;
+
+    shared_ptr<ParamSurface> param_surf = surface;
+    shared_ptr<BoundedSurface> bounded_surf = dynamic_pointer_cast<BoundedSurface>(param_surf);
+    if (bounded_surf.get())
+      param_surf = bounded_surf->underlyingSurface();
+
+    // Next insert first and second partial order derivatives
+    vector<CurveLoop> boundary_loops = surface->allBoundaryLoops();
+    for (int i = 0; i < int(boundary_loops.size()); ++i)
+      for (int j = 0; j < boundary_loops[i].size(); ++j)
+      {
+	shared_ptr<CurveOnSurface> curve_on_surf = dynamic_pointer_cast<CurveOnSurface, ParamCurve>(boundary_loops[i][j]);
+	shared_ptr<ParamCurve> param_curve = curve_on_surf->parameterCurve();
+	vector<double> int_pars;
+	vector<pair<double, double> > int_crvs;
+	Point pnt(par_u, par_v);
+	intersectCurvePoint(param_curve.get(), pnt, 1.0e-4, int_pars, int_crvs);
+	if (int_pars.size())
+	{
+	  double par_curve = int_pars[0];
+	  if (abs(par_curve - param_curve->startparam()) < DEFAULT_PARAMETER_EPSILON || abs(par_curve - param_curve->endparam()) < DEFAULT_PARAMETER_EPSILON)
+	  {
+	    // Closest point is start or end on boundary curve, all derivatives are zero.
+	    for (int i = 0; i < 27; ++i)
+	      result[insert_pos + i] = (float)0.0;
+	  }
+	  else
+	  {
+	    // Closest point is on boundary curve, not start or end point
+	    SplineCurve* geometry_curve = curve_on_surf->geometryCurve();
+	    vector<Point> curve_pts(4);
+	    geometry_curve->point(curve_pts, par_curve, 3);
+
+	    // See own document for calculation of derivatives for closest point function on curve
+	    Point pt_to_closest_pt = curve_pts[0] - point;
+	    double crv_denom = curve_pts[1] * curve_pts[1] + pt_to_closest_pt * curve_pts[2];
+	    if (crv_denom == 0.0)
+	    {
+	      // Not possible to calculate due to zero division.
+	      for (int i = 0; i < 27; ++i)
+		result[insert_pos + i] = (float)0.0;
+	    }
+	    else
+	    {
+	      double inv_denom = 1.0 / crv_denom;
+	      Point d_alpha = curve_pts[1] * inv_denom;
+	      matrix3D dd_alpha = symmetricTensorProduct(curve_pts[1], curve_pts[2]);
+	      multiplyInScalar(dd_alpha, crv_denom);
+	      matrix3D dc_tensor_dc = tensorProduct(curve_pts[1], curve_pts[1]);
+	      double dc_tesor_dc_fac = -(3.0 * (curve_pts[1] * curve_pts[2]) + pt_to_closest_pt * curve_pts[3]);
+	      addInMatrixScalar(dd_alpha, dc_tensor_dc, dc_tesor_dc_fac);
+	      multiplyInScalar(dd_alpha, inv_denom * inv_denom * inv_denom);
+
+	      // Insert first order derivatives of closest point
+	      for (int i = 0; i < 3; ++i)
+	      {
+		Point d_clp = curve_pts[1] * d_alpha[i];
+		for (int j = 0; j < 3; ++j, ++insert_pos)
+		  result[insert_pos] = (float)d_clp[j];
+	      }
+
+	      // Insert second order derivatives of closest point
+	      for (int i = 0; i < 3; ++i)
+	      {
+		// Restrict to j >= i due to symmetry of second order derivatives
+		for (int j = i; j < 3; ++j)
+		{
+		  Point dd_clp = curve_pts[2] * (d_alpha[i] * d_alpha[j]) + curve_pts[1] * dd_alpha[i][j];
+		  for (int k = 0; k < 3; ++k, ++insert_pos)
+		    result[insert_pos] = (float)dd_clp[k];
+		}
+	      }
+	    }
+	  }
+
+	  return;
+	}
+      }
+
+    // Closest point is on surface, not at boundary
+    vector<Point> surf_pts(10);
+    param_surf->point(surf_pts, par_u, par_v, 3);
+
+    // See own document for calculation of derivatives for closest point function on surface
+    Point pt_to_closest_pt = surf_pts[0] - point;
+    Point s_u = surf_pts[1];
+    Point s_v = surf_pts[2];
+    Point s_uu = surf_pts[3];
+    Point s_uv = surf_pts[4];
+    Point s_vv = surf_pts[5];
+    double f_uu = pt_to_closest_pt * s_uu + s_u * s_u;
+    double f_uv = pt_to_closest_pt * s_uv + s_u * s_v;
+    double f_vv = pt_to_closest_pt * s_vv + s_v * s_v;
+    double surf_denom = f_uu * f_vv - f_uv * f_uv;
+
+    if (surf_denom == 0.0)
+    {
+      // Not possible to calculate due to zero division.
+      for (int i = 0; i < 27; ++i)
+	result[insert_pos + i] = (float)0.0;
+    }
+    else
+    {
+      double inv_denom = 1.0 / surf_denom;
+
+      // Vectors of first order derivatives of the alpha function giving surface parameters for closest point.
+      Point d_alpha_u = (s_u * f_vv - s_v * f_uv) * inv_denom;
+      Point d_alpha_v = (s_v * f_uu - s_u * f_uv) * inv_denom;
+
+      // Matrices dd_alpha_u and dd_alpha_v for second order derivatives of the alpha function.
+      Point s_uuu = surf_pts[6];
+      Point s_uuv = surf_pts[7];
+      Point s_uvv = surf_pts[8];
+      Point s_vvv = surf_pts[9];
+      double f_uuu = pt_to_closest_pt * s_uuu + 3.0 * (s_u * s_uu);
+      double f_uuv = pt_to_closest_pt * s_uuv + s_v * s_uu + 2.0 * (s_u * s_uv);
+      double f_uvv = pt_to_closest_pt * s_uvv + s_u * s_vv + 2.0 * (s_v * s_uv);
+      double f_vvv = pt_to_closest_pt * s_vvv + 3.0 * (s_v * s_vv);
+
+      matrix3D ten_au_au = tensorProduct(d_alpha_u, d_alpha_u);
+      matrix3D sym_au_av = symmetricTensorProduct(d_alpha_u, d_alpha_v);
+      matrix3D ten_av_av = tensorProduct(d_alpha_v, d_alpha_v);
+
+      matrix3D matr_u = symmetricTensorProduct(d_alpha_u, s_uu);
+      addInMatrix(matr_u, symmetricTensorProduct(d_alpha_v, s_uv));
+      addInMatrixScalar(matr_u, ten_au_au, -f_uuu);
+      addInMatrixScalar(matr_u, sym_au_av, -f_uuv);
+      addInMatrixScalar(matr_u, ten_av_av, -f_uvv);
+      multiplyInScalar(matr_u, inv_denom);
+      matrix3D matr_v = symmetricTensorProduct(d_alpha_v, s_vv);
+      addInMatrix(matr_v, symmetricTensorProduct(d_alpha_u, s_uv));
+      addInMatrixScalar(matr_v, ten_au_au, -f_uuv);
+      addInMatrixScalar(matr_v, sym_au_av, -f_uvv);
+      addInMatrixScalar(matr_v, ten_av_av, -f_vvv);
+      multiplyInScalar(matr_v, inv_denom);
+
+      matrix3D dd_alpha_u = zeroMatrix();
+      addInMatrixScalar(dd_alpha_u, matr_u, f_vv);
+      addInMatrixScalar(dd_alpha_u, matr_v, -f_uv);
+      matrix3D dd_alpha_v = zeroMatrix();
+      addInMatrixScalar(dd_alpha_v, matr_u, -f_uv);
+      addInMatrixScalar(dd_alpha_v, matr_v, f_uu);
+
+      // Insert first order derivatives of closest point
+      for (int i = 0; i < 3; ++i)
+      {
+	Point d_clp = s_u * d_alpha_u[i] + s_v * d_alpha_v[i];
+	for (int j = 0; j < 3; ++j, ++insert_pos)
+	  result[insert_pos] = (float)d_clp[j];
+      }
+
+      // Insert second order derivatives of closest point
+      for (int i = 0; i < 3; ++i)
+      {
+	// Restrict to j >= i due to symmetry of second order derivatives
+	for (int j = i; j < 3; ++j)
+	{
+	  Point dd_clp = s_uu * (d_alpha_u[i] * d_alpha_u[j]) + s_vv * (d_alpha_v[i] * d_alpha_v[j])
+	    + s_uv * (d_alpha_u[i] * d_alpha_v[j] + d_alpha_v[i] * d_alpha_u[j])
+	    + s_u * dd_alpha_u[i][j] + s_v * dd_alpha_v[i][j];
+	  for (int k = 0; k < 3; ++k, ++insert_pos)
+	    result[insert_pos] = (float)dd_clp[k];
+	}
+      }
+    }
+  }
 
   vector<float> closestPointCalculations(const vector<float>& inPoints, const shared_ptr<BoundingBoxStructure>& boxStructure,
  					 const vector<vector<double> >& rotationMatrix, const Point& translation,
@@ -1420,6 +1599,8 @@ namespace Go
       result_size *= 3;
     else if (return_type == 3)
       result_size *= 4;
+    else if (return_type == 4)
+      result_size *= 30;  // (1 point + 3 derivatives + 6 second ord deriv) * 3 dimensions
     vector<float> result(result_size);
 
     // if (return_type == 2)
@@ -1923,6 +2104,12 @@ namespace Go
                                               const vector<vector<double> >& rotationMatrix, const Point& translation)
   {
     return closestPointCalculations(inPoints, boxStructure, rotationMatrix, translation, 3);
+  }
+
+  vector<float> closestPointDerivatives(const vector<float>& inPoints, const shared_ptr<BoundingBoxStructure>& boxStructure,
+    const vector<vector<double> >& rotationMatrix, const Point& translation)
+  {
+    return closestPointCalculations(inPoints, boxStructure, rotationMatrix, translation, 4);
   }
 
 }   // end namespace Go
