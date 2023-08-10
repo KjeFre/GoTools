@@ -48,6 +48,48 @@
 
 namespace Go
 {
+  namespace matrix3DUtils
+  {
+    typedef std::vector<std::vector<double> > matrix3D;
+
+    /// Return the 3x3 zero matrix
+    matrix3D zeroMatrix();
+
+    /// Return the 3x3 identity matrix
+    matrix3D identity3D();
+
+    /// Add the 3x3 matrix 'add' into the 3x3 matrix 'base'. This will change 'base'
+    void addInMatrix(matrix3D& base, const matrix3D& add);
+
+    /// Add a scalar into the 3x3 matrix 'base'. This will change 'base'
+    void multiplyInScalar(matrix3D& base, double scalar);
+
+    /// Add the 3x3 matrix 'add' multiplied by a scalar into the 3x3 matrix 'base'. This will change 'base'
+    void addInMatrixScalar(matrix3D& base, const matrix3D& add, double scalar);
+
+    /// Multiply two 3x3 matrices and return the result. The input matrices are not changed
+    matrix3D multiply(const matrix3D& m1, const matrix3D& m2);
+
+    /// Return the 3x3 matrix of the outer product of the 3-dimensional vectors p and q
+    matrix3D tensorProduct(Point p, Point q);
+
+    /// Return pTq + qTp where T is the tensor product and p and q are 3-dimensional vectors
+    matrix3D symmetricTensorProduct(Point p, Point q);
+
+    /// Return the cross product matrix of a 3-dimensional vector
+    matrix3D crossProductMatrix(Point p);
+
+    /// Return the rotation matrix representing rotation of a given angle around a given normal vector
+    matrix3D rotationMatrix(Point normal_vector, double angle);
+
+    /// Return the rotation matrix from a rotation vector R, where length of R is rotation angle, and direction of R is normal vector of rotation
+    matrix3D rotationMatrix(Point r);
+
+    /// Return the result of applying a 3x3 matrix to a point
+    Point apply(const matrix3D& mat, const Point p);
+
+  }   // end namespace Go::matrix3DUtils
+
 
   /// Namespace for preprocessing structures on a surface model used to speed up closest point calculations.
   /// It consists of three classes:
