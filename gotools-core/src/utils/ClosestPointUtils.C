@@ -42,9 +42,7 @@
 #include <istream>
 #include <fstream>
 #include <sstream>
-#include "GoTools/geometry/ParamSurface.h"
 #include "GoTools/geometry/SplineSurface.h"
-#include "GoTools/geometry/BoundedSurface.h"
 #include "GoTools/geometry/Sphere.h"
 #include "GoTools/geometry/Line.h"
 #include "GoTools/geometry/Cylinder.h"

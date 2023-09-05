@@ -44,6 +44,8 @@
 #include <vector>
 #include "GoTools/utils/Point.h"
 #include "GoTools/geometry/GeomObject.h"
+#include "GoTools/geometry/ParamSurface.h"
+#include "GoTools/geometry/BoundedSurface.h"
 
 
 namespace Go

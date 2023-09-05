@@ -43,6 +43,7 @@
 
 #include <vector>
 #include "GoTools/utils/Point.h"
+#include "GoTools/utils/ClosestPointUtils.h"
 
 
 namespace Go
