@@ -172,6 +172,12 @@ namespace Go
 			 const std::vector<std::vector<std::vector<double> > >& lhs_matrix,
 			 const std::vector<std::vector<double> >& rhs_matrix);
 
+  void addToLinearSystem(int pt_idx, const std::vector<Point>& points, const std::vector<float>& clp_w_derivatives, bool allow_rescaling,
+			 const Point& fine_R, const Point& fine_T, double fine_s,
+			 const std::vector<std::vector<double> >& m_rot_R, double s2, double R2, bool zero_R,
+			 const std::vector<std::vector<std::vector<double> > >& lhs_matrix,
+			 const std::vector<std::vector<double> >& rhs_matrix);
+
   /// Given two sequences of points in 3D, get the rotation, rescaling (optional) and translation that sends the second point set
   /// as close as possible to the first (i.e. that minimizes the sum of the square distances). The sequences must be of
   /// same length (at least three), and the points will be matched in the order they come in the vectors, i.e.
@@ -186,6 +192,9 @@ namespace Go
   /// points_transform[i] should, after the transformation, be close to points_fixed[i].
   RegistrationResult registration(const std::vector<Point>& points_fixed, const std::vector<Point>& points_transform,
 				  bool allow_rescaling, RegistrationInput params);
+
+  RegistrationResult fineRegistration(const std::vector<float> points, const shared_ptr<boxStructuring::BoundingBoxStructure>& boxStructure,
+				      bool allow_rescaling, RegistrationInput params);
 
 
 } // namespace Go

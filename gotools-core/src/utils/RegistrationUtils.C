@@ -514,8 +514,185 @@ namespace Go
     all_rhs_matrix[thread_id][6] += dEds;
    }
 
+  void addToLinearSystem(int pt_idx, const std::vector<Point>& points, const std::vector<float>& clp_w_derivatives, bool allow_rescaling,
+			 const Point& fine_R, const Point& fine_T, double fine_s,
+			 const vector<vector<double> >& m_rot_R, double s2, double R2, bool zero_R,
+			 vector<vector<vector<double> > >& all_lhs_matrix,
+			 vector<vector<double> >& all_rhs_matrix)
+  {
+#ifdef _OPENMP
+    int thread_id = omp_get_thread_num();
+#else
+    int thread_id = 0;
+#endif
 
-//===========================================================================
+    Point v_zero = Point(0.0, 0.0, 0.0);
+    vector<Point> v_unit(3);
+    v_unit[0] = Point(1.0, 0.0, 0.0);
+    v_unit[1] = Point(0.0, 1.0, 0.0);
+    v_unit[2] = Point(0.0, 0.0, 1.0);
+
+    Point v_p = points[pt_idx];
+    int clp_idx = 30 * pt_idx;
+    Point v_clp = Point(clp_w_derivatives[clp_idx], clp_w_derivatives[clp_idx + 1], clp_w_derivatives[clp_idx + 2]);
+    clp_idx += 3;
+    Point v_t = apply(m_rot_R, v_p) + fine_T - v_clp;
+    vector<Point> unit_x_p(3);
+    for (int i = 0; i < 3; ++i)
+      unit_x_p[i] = v_unit[i] % v_p;
+
+    // Set first and second order derivatives of the phi function
+    vector<Point> d_phi(7);
+    vector<vector<Point> > dd_phi(7);
+    for (int i = 0; i < 7; ++i)
+      dd_phi[i] = vector<Point>(7);
+
+    if (zero_R)
+    {
+      // Current fine rotation vector is zero
+      d_phi[6] = v_p;
+      dd_phi[6][6] = v_zero;
+
+      for (int i = 0; i < 3; ++i)
+      {
+	dd_phi[i + 3][6] = dd_phi[6][i + 3] = v_zero;
+	d_phi[i + 3] = v_unit[i];
+	dd_phi[i][6] = dd_phi[6][i] = unit_x_p[i];
+	d_phi[i] = fine_s * dd_phi[i][6];
+
+	for (int j = 0; j < 3; ++j)
+	{
+	  dd_phi[i][j + 3] = dd_phi[i + 3][j] = dd_phi[i + 3][j + 3] = v_zero;
+	  Point dd_RiRj = (v_unit[i] * v_p[j] + v_unit[j] * v_p[i]) * 0.5;
+	  if (i == j)
+	    dd_RiRj -= v_p;
+	  dd_phi[i][j] = dd_RiRj * fine_s;
+	}
+      }
+    }
+    else
+    {
+      // Current fine rotation vector is non-zero
+
+      // Calculate A, B and C-values
+      double len_R = sqrt(R2);
+      double sin_R = sin(len_R);
+      double cos_R = cos(len_R);
+      double one_min_cos = 1.0 - cos_R;
+
+      double inv_R1 = 1.0 / len_R;
+      double inv_R2 = 1.0 / R2;
+      double inv_R3 = inv_R1 * inv_R2;
+      double inv_R4 = inv_R2 * inv_R2;
+      double inv_R5 = inv_R2 * inv_R3;
+      double inv_R6 = inv_R2 * inv_R4;
+
+      double A0 = cos_R;
+      double B0 = one_min_cos * inv_R2;
+      double C0 = sin_R * inv_R1;
+      double A1 = -sin_R * inv_R1;
+      double B1 = (len_R * sin_R - 2.0 * one_min_cos) * inv_R4;
+      double C1 = (len_R * cos_R - sin_R) * inv_R3;
+      double A2 = (sin_R - len_R * cos_R) * inv_R3;
+      double B2 = (R2 * cos_R - 5.0 * len_R * sin_R + 8.0 * one_min_cos) * inv_R6;
+      double C2 = (3.0 * sin_R - 3.0 * len_R * cos_R - R2 * sin_R) * inv_R5;
+
+      // Some matrices, vectors and operations on these, used only for R != 0
+      Point Rxp = fine_R % v_p;
+      double p_dot_R = v_p * fine_R;
+      //double R_dot_t = fine_R * v_t;
+      //double pR2 = p_dot_R * p_dot_R;
+      //double pxR2 = Rxp * Rxp;
+
+      d_phi[6] = v_p * A0 + fine_R * (B0 * p_dot_R);
+      dd_phi[6][6] = v_zero;
+
+      Point v_Ri = v_p * A1 + fine_R * (B1 * p_dot_R) + Rxp * C1;
+      Point v_pi = fine_R * B0;
+      double fac_ei = B0 * p_dot_R;
+
+      Point v_RiRj = v_p * A2 + fine_R * (B2 * p_dot_R) + Rxp * C2;
+      Point v_Ripj = fine_R * B1;
+      double fac_Riej = B1 * p_dot_R;
+      Point v_Riej_x = v_p * C1;
+
+      for (int i = 0; i < 3; ++i)
+      {
+	double ri = fine_R[i];
+	double pi = v_p[i];
+	Point ei = v_unit[i];
+
+	dd_phi[i + 3][6] = dd_phi[6][i + 3] = v_zero;
+	d_phi[i + 3] = ei;
+	dd_phi[i][6] = dd_phi[6][i] = v_Ri * ri + v_pi * pi + ei * fac_ei + unit_x_p[i] * C0;
+	d_phi[i] = dd_phi[i][6] * fine_s;
+
+	for (int j = 0; j < 3; ++j)
+	{
+	  double rj = fine_R[j];
+	  double pj = v_p[j];
+	  Point ej = v_unit[j];
+	  Point sym_Riej = ei * rj + ej * ri;
+
+	  dd_phi[i][j + 3] = dd_phi[i + 3][j] = dd_phi[i + 3][j + 3] = v_zero;
+	  Point dd_RiRj = v_RiRj * (ri * rj) + v_Ripj * (ri * pj + rj * pi) + sym_Riej * fac_Riej + (ei * pj + ej * pi) * B0 + sym_Riej % v_Riej_x;
+	  if (i == j)
+	    dd_RiRj += v_Ri;
+	  dd_phi[i][j] = dd_RiRj * fine_s;
+	}
+      }
+    }
+
+    // Closest point derivatives as vectors
+    vector<Point> d_clp(3);
+    for (int i = 0; i < 3; ++i, clp_idx += 3)
+      d_clp[i] = Point(clp_w_derivatives[clp_idx], clp_w_derivatives[clp_idx + 1], clp_w_derivatives[clp_idx + 2]);
+
+    vector<vector<Point> > dd_clp(3);
+    for (int i = 0; i < 3; ++i)
+    {
+      dd_clp[i] = vector<Point>(3);
+      for (int j = 0; j < 3; ++j)
+      {
+	if (j < i)
+	  dd_clp[i][j] = dd_clp[j][i];
+	else
+	{
+	  dd_clp[i][j] = Point(clp_w_derivatives[clp_idx], clp_w_derivatives[clp_idx + 1], clp_w_derivatives[clp_idx + 2]);
+	  clp_idx += 3;
+	}
+      }
+    }
+
+    // Derivatives of phi - closest_pt(phi) and contribution to rhs matrix
+    vector<Point> d_t(7);
+    for (int i = 0; i < 7; ++i)
+    {
+      Point t_scalar = d_phi[i];
+      for (int j = 0; j < 3; ++j)
+	t_scalar -= d_clp[j] * d_phi[i][j];
+      d_t[i] = t_scalar;
+      all_rhs_matrix[thread_id][i] += t_scalar * v_t;
+    }
+
+    // Contributions to lhs matrix
+    for (int i = 0; i < 7; ++i)
+    {
+      for (int j = 0; j < 7; ++j)
+      {
+	Point t_scalar = dd_phi[i][j];
+	for (int k = 0; k < 3; ++k)
+	{
+	  t_scalar -= d_clp[k] * dd_phi[i][j][k];
+	  for (int l = 0; l < 3; ++l)
+	    t_scalar -= dd_clp[k][l] * d_phi[i][k] * d_phi[j][l];
+	}
+	all_lhs_matrix[thread_id][i][j] += d_t[i] * d_t[j] + t_scalar * v_t;
+      }
+    }
+  }
+
+  //===========================================================================
   RegistrationResult fineRegistration(const vector<Point>& points_fixed, const vector<Point>& points_transform, bool allow_rescaling, RegistrationInput params)
 //===========================================================================
   {
@@ -732,5 +909,194 @@ namespace Go
     return result;
   }
 
+//===========================================================================
+  RegistrationResult fineRegistration(const std::vector<float> points, const shared_ptr<boxStructuring::BoundingBoxStructure>& boxStructure, bool allow_rescaling, RegistrationInput params)
+//===========================================================================
+  {
+    {
+      RegistrationResult result;
+
+#ifdef _OPENMP
+      int max_threads = omp_get_max_threads();
+#else
+      int max_threads = 1;
+#endif
+
+      int n_pts = ((int)points.size()) / 3;
+      if (n_pts < 3)
+      {
+	result.result_type_ = TooFewPoints;
+	return result;
+      }
+
+      double tol_2 = params.newton_tolerance_;
+      int max_iterations = params.max_newton_iterations_;
+
+      // Description of fine registration. Originally the identity operation
+      // For description of the formulas, see own document
+      Point fine_R(0.0, 0.0, 0.0);
+      Point fine_T(0.0, 0.0, 0.0);
+      double fine_s = 1.0;
+
+      result.last_change_ = 0.0;
+
+      //matrix3D id = identity3D();
+
+      vector<Point> points_d(n_pts);
+      for (int i = 0, idx = 0; idx < n_pts; i += 3, ++idx)
+	points_d[idx] = Point(points[i], points[i + 1], points[i + 2]);
+
+      for (int iteration = 0; iteration < max_iterations && (iteration == 0 || result.last_change_ >= tol_2); ++iteration)
+      {
+	result.last_newton_iteration_ = iteration;
+
+	// Coefficients for linear system
+	vector<vector<vector<double> > > all_lhs_matrix(max_threads);
+	vector<vector<double> > all_rhs_matrix(max_threads);
+	for (int th = 0; th < max_threads; ++th)
+	{
+	  all_lhs_matrix[th].resize(7);
+	  all_rhs_matrix[th].resize(7);
+	  for (int i = 0; i < 7; ++i)
+	    all_lhs_matrix[th][i].resize(7);
+	}
+
+	// Calculations independent of each point
+	matrix3D m_rot_R = rotationMatrix(fine_R);
+	multiplyInScalar(m_rot_R, fine_s);
+	double s2 = fine_s * fine_s;
+	double R2 = fine_R.length2();
+	bool zero_R = R2 == 0.0;
+
+	// Get closest points with derivatives
+	vector<float> closestPointsWithDeriv = closestPointDerivatives(points, boxStructure, m_rot_R, fine_T);
+
+#ifdef _OPENMP
+	if (params.multi_core_)
+	{
+	  // Run linear system calculations in multicore, because params.multi_core_=true and OPENMP is included
+	  int pt_idx;
+#pragma omp parallel \
+  default(none)	\
+  private(pt_idx) \
+  shared(n_pts, points_d, closestPointsWithDeriv, allow_rescaling, fine_R, fine_T, fine_s, m_rot_R, s2, R2, zero_R, all_lhs_matrix, all_rhs_matrix)
+#pragma omp for schedule(auto)
+	  for (pt_idx = 0; pt_idx < n_pts; ++pt_idx)
+	    addToLinearSystem(pt_idx, points_d, closestPointsWithDeriv, allow_rescaling,
+	      fine_R, fine_T, fine_s,
+	      m_rot_R, s2, R2, zero_R,
+	      all_lhs_matrix,
+	      all_rhs_matrix);
+	}
+
+	else
+
+	{
+	  // Run linear system calculations in one single thread, because params.multi_core_=false
+	  for (int pt_idx = 0; pt_idx < n_pts; ++pt_idx)
+	    addToLinearSystem(pt_idx, points_d, closestPointsWithDeriv, allow_rescaling,
+	      fine_R, fine_T, fine_s,
+	      m_rot_R, s2, R2, zero_R,
+	      all_lhs_matrix,
+	      all_rhs_matrix);
+	}
+
+#else   // #ifdef _OPENMP
+
+	// Run linear system calculations in one single thread, because OPENMP is not included
+	for (int pt_idx = 0; pt_idx < n_pts; ++pt_idx)
+	  addToLinearSystem(pt_idx, points_d, closestPointsWithDeriv, allow_rescaling,
+	    fine_R, fine_T, fine_s,
+	    m_rot_R, s2, R2, zero_R,
+	    all_lhs_matrix,
+	    all_rhs_matrix);
+
+#endif   // #ifdef _OPENMP
+
+	vector<vector<double> > lhs_matrix(7);
+	vector<double> rhs_matrix(7);
+	for (int i = 0; i < 7; ++i)
+	{
+	  lhs_matrix[i].resize(7);
+	  for (int j = 0; j < 7; ++j)
+	  {
+	    for (int th = 0; th < max_threads; ++th)
+	      lhs_matrix[i][j] += all_lhs_matrix[th][i][j];
+	  }
+	  for (int th = 0; th < max_threads; ++th)
+	    rhs_matrix[i] += all_rhs_matrix[th][i];
+	}
+
+	// Make flat representation of the 6x6 (rescaling not allowed) or 7x7 (rescaling allowed) Hessian matrix
+	vector<double> lhs_matrix_flat;
+	int n_rows = allow_rescaling ? 7 : 6;
+	for (int i = 0; i < n_rows; ++i)
+	  for (int j = 0; j < n_rows; ++j)
+	    lhs_matrix_flat.push_back(lhs_matrix[i][j]);
+
+	// Solve the equation system by Conjugate Gradient Method.
+	SolveCG solveCg;
+	solveCg.attachMatrix(&lhs_matrix_flat[0], n_rows);
+	solveCg.setTolerance(params.solve_tolerance_);
+	solveCg.setMaxIterations(params.max_solve_iterations_);
+	solveCg.precondRILU(0.1);
+
+	// Fetch solution
+	vector<double> change(n_rows, 0.0);
+	int solve_res = solveCg.solve(&change[0], &rhs_matrix[0], n_rows);
+	if (solve_res < 0 || solve_res == 1)
+	{
+	  result.result_type_ = SolveFailed;
+	  result.solve_result_ = solve_res;
+	  return result;
+	}
+
+	// Calculate weigths for tolerance calculations
+	Point change_R = Point(change[0], change[1], change[2]);
+	Point change_T = Point(change[3], change[4], change[5]);
+	if (iteration == 0 && params.calculate_tolerance_weights_)
+	{
+	  double len_R = change_R.length2();
+	  if (len_R == 0.0)
+	    len_R = 1.0;
+	  double len_T = change_T.length2();
+	  if (len_T == 0.0)
+	    len_T = 1.0;
+	  params.tolerance_weight_translation_ = 1.0;
+	  params.tolerance_weight_rotation_ = len_T / len_R;
+	  if (allow_rescaling)
+	  {
+	    double len_s = change[6] * change[6];
+	    if (len_s == 0.0)
+	      len_s = 1.0;
+	    params.tolerance_weight_rescale_ = len_T / len_s;
+	  }
+	  else
+	    params.tolerance_weight_rescale_ = 1.0;
+	}
+
+	// Apply result of solution of equation system
+	fine_R -= change_R;
+	fine_T -= change_T;
+	if (allow_rescaling)
+	  fine_s -= change[6];
+
+	result.last_change_ = change_R.length2() * params.tolerance_weight_rotation_ + change_T.length2() * params.tolerance_weight_translation_;
+	if (allow_rescaling)
+	  result.last_change_ += change[6] * change[6] * params.tolerance_weight_rescale_;
+
+      }   // End Newton iteration
+
+      if (result.last_change_ >= tol_2)
+	result.last_newton_iteration_ = max_iterations;
+
+      result.rotation_matrix_ = rotationMatrix(fine_R);
+      result.rescaling_ = fine_s;
+      result.translation_ = fine_T;
+      result.result_type_ = RegistrationOK;
+
+      return result;
+    }
+  }
 
 }   // end namespace Go

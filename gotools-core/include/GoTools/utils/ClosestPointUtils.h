@@ -50,6 +50,7 @@ namespace Go
 {
   namespace matrix3DUtils
   {
+    /// 3x3 matrix, outer vector is for each row, inner vector is for each column
     typedef std::vector<std::vector<double> > matrix3D;
 
     /// Return the 3x3 zero matrix
