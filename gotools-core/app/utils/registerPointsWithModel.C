@@ -60,6 +60,7 @@
 
 
 //#define GOTOOLS_LOG
+//#define USE_CLOSEST_POINTS_DERIVS
 
 using namespace Go;
 using namespace std;
@@ -872,6 +873,41 @@ void registrationIteration(const vector<float>& pts, const shared_ptr<boxStructu
 
 }
 
+void registrationByClpDerivs(const vector<float>& pts, const shared_ptr<boxStructuring::BoundingBoxStructure>& structure, double changeL2tol)
+{
+  int nmb_pts = pts.size() / 3;
+  RegistrationInput regParameters;
+  regParameters.newton_tolerance_ = changeL2tol;
+
+  RegistrationResult regResult = fineRegistration(pts, structure, false, regParameters);
+  currentTransformation = transformation_type(regResult.rotation_matrix_, regResult.translation_);
+
+  int newton_iterations = regResult.last_newton_iteration_;
+  int max_newton_iterations = regParameters.max_newton_iterations_;
+  bool reg_OK = (regResult.result_type_ == RegistrationOK) && (newton_iterations < max_newton_iterations);
+
+  if (!reg_OK)
+  {
+    cout << endl << "******* REGISTRATION FAILED!!! *****" << endl;
+    cout << "  Newton method failing reason: ";
+    switch (regResult.result_type_)
+    {
+    case RegistrationOK:
+      cout << "Did not get close enough in maximum number of iterations (" << max_newton_iterations << ")" << endl;
+      break;
+    case TooFewPoints:
+      cout << "To few input points (must be at least 3, was " << nmb_pts << ")" << endl;
+      break;
+    case SolveFailed:
+      cout << "Solving linear system failed" << endl;
+      break;
+    default:
+      cout << "Unknown reason (should not happen)" << endl;
+    }
+    exit(1);
+  }
+}
+
 
 int main( int argc, char* argv[] )
 {
@@ -1149,16 +1185,29 @@ int main( int argc, char* argv[] )
   }
 #endif //NDEBUG
 
+#ifdef USE_CLOSEST_POINTS_DERIVS
+  double t0 = getCurrentTime();
+  //std::cout << "DEBUG: Starting the full registration with clp derivs." << std::endl;
+  registrationByClpDerivs(pts, structure, 1.0e-05);
+  double t1 = getCurrentTime();
+  //std::cout << "DEBUG: Done with the full registration, time spent: " << t1 - t0 << std::endl;
+  //vector<float> final_clp = closestPoints(pts, structure, currentTransformation.first, currentTransformation.second);
+  //double final_dist = avgDist(final_clp, pts, currentTransformation);
+  //std::cout << "DEBUG: Final distance to closest points = " << final_dist << std::endl;
+#else
   for (int i = 0; i < reduce_factors.size(); ++i)
   {
       int red_fact = reduce_factors[i];
       if (red_fact == 1)
       {
 	  double t0 = getCurrentTime();
-//	  std::cout << "DEBUG: Starting the full registration." << std::endl;
+	  //std::cout << "DEBUG: Starting the full registration." << std::endl;
 	  registrationIteration(pts, structure, tolerances[i], reg_pts_status);
 	  double t1 = getCurrentTime();
-//	  std::cout << "DEBUG: Done with the full registration, time spent: " << t1 - t0 << std::endl; 
+	  //std::cout << "DEBUG: Done with the full registration, time spent: " << t1 - t0 << std::endl;
+	  //vector<float> final_clp = closestPoints(pts, structure, currentTransformation.first, currentTransformation.second);
+	  //double final_dist = avgDist(final_clp, pts, currentTransformation);
+	  //std::cout << "DEBUG: Final distance to closest points = " << final_dist << std::endl;
      }
       else
       {
@@ -1169,13 +1218,17 @@ int main( int argc, char* argv[] )
 		  for (int k = 0; k < 3; ++k)
 		      few_pts.push_back(pts[j + k]);
 	  double t0 = getCurrentTime();
-//	  std::cout << "DEBUG: Starting the rough registration." << std::endl;
+	  //std::cout << "DEBUG: Starting the rough registration." << std::endl;
 	  registrationIteration(few_pts, structure, tolerances[i], reg_pts_status);
 	  double t1 = getCurrentTime();
-//	  std::cout << "DEBUG: Done with the rough registration, time spent: " << t1 - t0 << std::endl;
+	  //std::cout << "DEBUG: Done with the rough registration, time spent: " << t1 - t0 << std::endl;
+	  //vector<float> final_clp = closestPoints(few_pts, structure, currentTransformation.first, currentTransformation.second);
+	  //double final_dist = avgDist(final_clp, few_pts, currentTransformation);
+	  //std::cout << "DEBUG: Final distance to closest points = " << final_dist << std::endl;
       }
       reg_pts_status.increaseIterationLevel();
   }
+#endif // ifdef USE_CLOSEST_POINTS_DERIVS
 
 #ifdef GOTOOLS_LOG
   dropTransformation(currentTransformation, "  Final rotation and transformation:");
