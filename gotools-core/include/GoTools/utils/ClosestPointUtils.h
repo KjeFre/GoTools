@@ -46,6 +46,7 @@
 #include "GoTools/geometry/GeomObject.h"
 #include "GoTools/geometry/ParamSurface.h"
 #include "GoTools/geometry/BoundedSurface.h"
+#include <GoTools/geometry/SurfaceTools.h>
 
 
 namespace Go
@@ -122,6 +123,7 @@ namespace Go
           : index_(-1), segs_u_(-1), segs_v_(-1)
       {
 	surfaces_.push_back(surface);
+	surface_boundary_loops_.push_back(SurfaceTools::allBoundarySfLoops(surface, DEFAULT_SPACE_EPSILON));
       }
 
       /// Set the number of segments in the mesh structure in both parameter directions
@@ -162,8 +164,12 @@ namespace Go
 	  nmb_copies = 1;
 	int old_nmb = surfaces_.size();
 	surfaces_.resize(nmb_copies);
+	surface_boundary_loops_.resize(nmb_copies);
 	for (int i = old_nmb; i < nmb_copies; ++i)
+	{
 	  surfaces_[i] = shared_ptr<ParamSurface>(surfaces_[0]->clone());
+	  surface_boundary_loops_[i] = SurfaceTools::allBoundarySfLoops(surfaces_[i], DEFAULT_SPACE_EPSILON);
+	}
       }
 
       /// Get a specific copy of the surface
@@ -171,6 +177,12 @@ namespace Go
 	{
 	  return surfaces_[idx];
 	}
+
+      // Get the boundary loops for a specific copy of the surface
+      vector<CurveLoop> surface_boundary_loop(int idx)
+      {
+	return surface_boundary_loops_[idx];
+      }
 
       /// Add internal surface point
       void add_inside_point(Point pt)
@@ -197,6 +209,9 @@ namespace Go
 
       /// The surface, might be cloned into copies to avoid evaluation errors when running multiple threads
       std::vector<shared_ptr<ParamSurface> > surfaces_;
+
+      // The boundary loops of the surface, one set for each surface clone
+      std::vector<std::vector<CurveLoop> > surface_boundary_loops_;
 
       /// A set of points on the surface inside, but close to, the limiting curve loop, used to get an upper bound of the distance from a point to the surface
       /// Only used if the surface is a BoundedSurface
@@ -614,11 +629,12 @@ namespace Go
   /// \param par_u The first parameter of the closest point on the surface
   /// \param par_v The second parameter of the closest point on the surface
   /// \param surface The surface
+  /// \param boundary_loops The boundary loops of the surface
   /// \param result Where the result is stored. The result will be 30 values, first the 3 coordinates of the closest point,
   /// then the coordinates of the first order derivatives of the closest point function in order dx, dy, dz, then the coordinates
   /// of the second order derivatives in order dxdx, dxdy, dxdz, dydy, dydz, dzdz.
   /// \param insert_pos The insert position in the 'result' vector of the first value. The 'result' vector must have length at least 30 + 'insert_pos'.
-  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, std::vector<float>& result, int insert_pos);
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const std::vector<CurveLoop>& boundary_loops, std::vector<float>& result, int insert_pos);
 
   /// Calculates the closest points of a point cloud to a surface model, after a SO(3)-rotation and translation is applied on the point clod.
   /// The method uses polygons inside the bounding curves on paramter domains to help determining if parameter pairs are inside the

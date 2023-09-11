@@ -1400,12 +1400,14 @@ namespace Go
     }
     else if (return_type == 4) // Store closest point and first and second order derivaties of closest point function
     {
-      shared_ptr<ParamSurface> paramSurf = boxStructure->getSurface(best_idx)->surface(thread_id);
-      closestPointWithDerivatives(pt, best_pt, best_u, best_v, paramSurf, result, 30 * pt_idx);
+      shared_ptr<SurfaceData> surf_data = boxStructure->getSurface(best_idx);
+      shared_ptr<ParamSurface> paramSurf = surf_data->surface(thread_id);
+      vector<CurveLoop> curve_loop = surf_data->surface_boundary_loop(thread_id);
+      closestPointWithDerivatives(pt, best_pt, best_u, best_v, paramSurf, curve_loop, result, 30 * pt_idx);
     }
   }
 
-  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, vector<float>& result, int insert_pos)
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const vector<CurveLoop>& boundary_loops, vector<float>& result, int insert_pos)
   {
     // First insert point
     for (int i = 0; i < 3; ++i)
@@ -1418,12 +1420,16 @@ namespace Go
       param_surf = bounded_surf->underlyingSurface();
 
     // Next insert first and second partial order derivatives
-    vector<CurveLoop> boundary_loops = surface->allBoundaryLoops();
     for (int i = 0; i < int(boundary_loops.size()); ++i)
       for (int j = 0; j < boundary_loops[i].size(); ++j)
       {
-	shared_ptr<CurveOnSurface> curve_on_surf = dynamic_pointer_cast<CurveOnSurface, ParamCurve>(boundary_loops[i][j]);
-	shared_ptr<ParamCurve> param_curve = curve_on_surf->parameterCurve();
+	shared_ptr<ParamCurve> param_curve = boundary_loops[i][j];
+	shared_ptr<CurveOnSurface> curve_on_surf = dynamic_pointer_cast<CurveOnSurface, ParamCurve>(param_curve);
+	if (curve_on_surf.get())
+	{
+	  curve_on_surf->ensureParCrvExistence(DEFAULT_SPACE_EPSILON);
+	  param_curve = curve_on_surf->parameterCurve();
+	}
 	vector<double> int_pars;
 	vector<pair<double, double> > int_crvs;
 	Point pnt(par_u, par_v);
