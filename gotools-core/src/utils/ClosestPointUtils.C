@@ -1069,6 +1069,7 @@ namespace Go
     double best_u = 0.0;
     double best_v = 0.0;
     int best_idx = -1;
+    bool best_inside = true;
 
     // Main loop for running through possible candidates.
     // If vox_span = -1, only check boxes (bounding boxes of surfaces segments) where the point lies inside the box
@@ -1124,6 +1125,7 @@ namespace Go
 		    best_pt = clo_pt;
 		    best_u = clo_u;
 		    best_v = clo_v;
+		    best_inside = false;
 		    any_clp_found = true;
 
 		    // Remove from list of possible candidates those that for sure are not better
@@ -1342,6 +1344,7 @@ namespace Go
 				best_pt = clo_pt;
 				best_u = clo_u;
 				best_v = clo_v;
+				best_inside = true;
 				any_clp_found = true;
 				int poss_in_size = (int)poss_in.size();
 				for (int j = 0; j < poss_in_size;)
@@ -1401,13 +1404,23 @@ namespace Go
     else if (return_type == 4) // Store closest point and first and second order derivaties of closest point function
     {
       shared_ptr<SurfaceData> surf_data = boxStructure->getSurface(best_idx);
-      shared_ptr<ParamSurface> paramSurf = surf_data->surface(thread_id);
+      shared_ptr<ParamSurface> surface = surf_data->surface(thread_id);
       vector<CurveLoop> curve_loop = surf_data->surface_boundary_loop(thread_id);
-      closestPointWithDerivatives(pt, best_pt, best_u, best_v, paramSurf, curve_loop, result, 30 * pt_idx);
+      bool on_surface = best_inside;
+      if (on_surface)
+      {
+	shared_ptr<ParamSurface> paramSurf = surface;
+	shared_ptr<BoundedSurface> boundedSurf = dynamic_pointer_cast<BoundedSurface>(paramSurf);
+	if (boundedSurf.get())
+	  paramSurf = boundedSurf->underlyingSurface();
+	Array<double, 2> pnt(best_u, best_v);
+	on_surface = !paramSurf->parameterDomain().isOnBoundary(pnt, 1.0e-4);
+      }
+      closestPointWithDerivatives(pt, best_pt, best_u, best_v, surface, curve_loop, result, 30 * pt_idx, on_surface);
     }
   }
 
-  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const vector<CurveLoop>& boundary_loops, vector<float>& result, int insert_pos)
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const vector<CurveLoop>& boundary_loops, vector<float>& result, int insert_pos, bool on_surface)
   {
     // First insert point
     for (int i = 0; i < 3; ++i)
@@ -1419,8 +1432,9 @@ namespace Go
     if (bounded_surf.get())
       param_surf = bounded_surf->underlyingSurface();
 
-    // Next insert first and second partial order derivatives
-    for (int i = 0; i < int(boundary_loops.size()); ++i)
+    // Next insert first and second partial order derivatives. We run through boundary loops to see if closest point is on the boundary.
+    int loops_to_test = on_surface ? 0 : int(boundary_loops.size());
+    for (int i = 0; i < loops_to_test; ++i)
       for (int j = 0; j < boundary_loops[i].size(); ++j)
       {
 	shared_ptr<ParamCurve> param_curve = boundary_loops[i][j];

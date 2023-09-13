@@ -179,7 +179,7 @@ namespace Go
 	}
 
       // Get the boundary loops for a specific copy of the surface
-      vector<CurveLoop> surface_boundary_loop(int idx)
+      std::vector<CurveLoop> surface_boundary_loop(int idx)
       {
 	return surface_boundary_loops_[idx];
       }
@@ -634,7 +634,8 @@ namespace Go
   /// then the coordinates of the first order derivatives of the closest point function in order dx, dy, dz, then the coordinates
   /// of the second order derivatives in order dxdx, dxdy, dxdz, dydy, dydz, dzdz.
   /// \param insert_pos The insert position in the 'result' vector of the first value. The 'result' vector must have length at least 30 + 'insert_pos'.
-  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const std::vector<CurveLoop>& boundary_loops, std::vector<float>& result, int insert_pos);
+  /// \param on_surface If true, the closest point is not on the boundary of the surface. If false, the closest point is most probably on the boundary, but might not be.
+  void closestPointWithDerivatives(const Point& point, const Point& closest_point, double par_u, double par_v, const shared_ptr<ParamSurface>& surface, const std::vector<CurveLoop>& boundary_loops, std::vector<float>& result, int insert_pos, bool on_surface);
 
   /// Calculates the closest points of a point cloud to a surface model, after a SO(3)-rotation and translation is applied on the point clod.
   /// The method uses polygons inside the bounding curves on paramter domains to help determining if parameter pairs are inside the
