@@ -60,7 +60,8 @@
 
 
 //#define GOTOOLS_LOG
-//#define USE_CLOSEST_POINTS_DERIVS
+//#define USE_CLOSEST_POINTS_DERIVS_ONCE
+//#define USE_CLOSEST_POINTS_DERIVS_ITERATIVE
 
 using namespace Go;
 using namespace std;
@@ -873,7 +874,7 @@ void registrationIteration(const vector<float>& pts, const shared_ptr<boxStructu
 
 }
 
-void registrationByClpDerivs(const vector<float>& pts, const shared_ptr<boxStructuring::BoundingBoxStructure>& structure, double changeL2tol)
+void registrationByClpDerivs(const vector<float>& pts, const shared_ptr<boxStructuring::BoundingBoxStructure>& structure, double changeL2tol, RegisterPointsStatus& reg_pts_status)
 {
   int nmb_pts = pts.size() / 3;
   RegistrationInput regParameters;
@@ -906,6 +907,7 @@ void registrationByClpDerivs(const vector<float>& pts, const shared_ptr<boxStruc
     }
     exit(1);
   }
+  reg_pts_status.updatePerformedRegisters(true);
 }
 
 
@@ -1185,12 +1187,12 @@ int main( int argc, char* argv[] )
   }
 #endif //NDEBUG
 
-#ifdef USE_CLOSEST_POINTS_DERIVS
-  double t0 = getCurrentTime();
+#ifdef USE_CLOSEST_POINTS_DERIVS_ONCE
+  double time0 = getCurrentTime();
   //std::cout << "DEBUG: Starting the full registration with clp derivs." << std::endl;
-  registrationByClpDerivs(pts, structure, 1.0e-05);
-  double t1 = getCurrentTime();
-  //std::cout << "DEBUG: Done with the full registration, time spent: " << t1 - t0 << std::endl;
+  registrationByClpDerivs(pts, structure, 1.0e-05, reg_pts_status);
+  double time1 = getCurrentTime();
+  //std::cout << "DEBUG: Done with the full registration, time spent: " << time1 - time0 << std::endl;
   //vector<float> final_clp = closestPoints(pts, structure, currentTransformation.first, currentTransformation.second);
   //double final_dist = avgDist(final_clp, pts, currentTransformation);
   //std::cout << "DEBUG: Final distance to closest points = " << final_dist << std::endl;
@@ -1202,7 +1204,11 @@ int main( int argc, char* argv[] )
       {
 	  double t0 = getCurrentTime();
 	  //std::cout << "DEBUG: Starting the full registration." << std::endl;
+#ifdef USE_CLOSEST_POINTS_DERIVS_ITERATIVE
+	  registrationByClpDerivs(pts, structure, tolerances[i], reg_pts_status);
+#else
 	  registrationIteration(pts, structure, tolerances[i], reg_pts_status);
+#endif
 	  double t1 = getCurrentTime();
 	  //std::cout << "DEBUG: Done with the full registration, time spent: " << t1 - t0 << std::endl;
 	  //vector<float> final_clp = closestPoints(pts, structure, currentTransformation.first, currentTransformation.second);
@@ -1219,7 +1225,11 @@ int main( int argc, char* argv[] )
 		      few_pts.push_back(pts[j + k]);
 	  double t0 = getCurrentTime();
 	  //std::cout << "DEBUG: Starting the rough registration." << std::endl;
+#ifdef USE_CLOSEST_POINTS_DERIVS_ITERATIVE
+	  registrationByClpDerivs(few_pts, structure, tolerances[i], reg_pts_status);
+#else
 	  registrationIteration(few_pts, structure, tolerances[i], reg_pts_status);
+#endif
 	  double t1 = getCurrentTime();
 	  //std::cout << "DEBUG: Done with the rough registration, time spent: " << t1 - t0 << std::endl;
 	  //vector<float> final_clp = closestPoints(few_pts, structure, currentTransformation.first, currentTransformation.second);
@@ -1228,7 +1238,7 @@ int main( int argc, char* argv[] )
       }
       reg_pts_status.increaseIterationLevel();
   }
-#endif // ifdef USE_CLOSEST_POINTS_DERIVS
+#endif // ifdef USE_CLOSEST_POINTS_DERIVS_ONCE
 
 #ifdef GOTOOLS_LOG
   dropTransformation(currentTransformation, "  Final rotation and transformation:");
